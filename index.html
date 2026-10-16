@@ -201,7 +201,7 @@ const thumbCache = new Map();
 /* ───── Connexió amb Apps Script ───── */
 // URL de la implementació de l'aplicació web (acaba en /exec). Es pot deixar aquí fixa
 // o configurar-la des de ⚙️ (es desa al navegador).
-const GAS_URL_PER_DEFECTE = '';
+const GAS_URL_PER_DEFECTE = 'https://script.google.com/macros/s/AKfycbznt2QDfCrVCKj40kfhuXplaEuX62z44XTVub1C5WeoW4HwgVV4BVw__iA5OdIYI8vL/exec';
 const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* sense emmagatzematge */ } };
 const cfg = () => ({ url: lsGet('garatge.url') || GAS_URL_PER_DEFECTE, clau: lsGet('garatge.clau') });
@@ -218,7 +218,7 @@ async function gasRun(fn, ...args) {
     });
   } catch (e) { throw new Error('No s\'ha pogut connectar amb l\'Apps Script'); }
   let out;
-  try { out = await res.json(); } catch (e) { throw new Error('Resposta no vàlida de l\'Apps Script (revisa la URL i que l\'accés sigui "Qualsevol persona")'); }
+  try { out = await res.json(); } catch (e) { throw new Error('L\'Apps Script no respon bé: revisa que estigui autoritzat (funció autoritzar) i implementat amb accés "Qualsevol persona"'); }
   if (!out.ok) {
     if (out.codi === 'CLAU') obrirConfig();
     throw new Error(out.error || 'Error desconegut');

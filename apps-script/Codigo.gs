@@ -42,7 +42,11 @@ function doPost(e) {
     if (!fn) return json_({ ok: false, error: 'Funció desconeguda: ' + req.fn });
     return json_({ ok: true, data: fn.apply(null, Array.isArray(req.args) ? req.args : []) });
   } catch (err) {
-    return json_({ ok: false, error: err && err.message ? err.message : String(err) });
+    const msg = err && err.message ? err.message : String(err);
+    if (/autoriz|permis|authoriz|permission/i.test(msg)) {
+      return json_({ ok: false, error: 'Falten permisos: executa la funció autoritzar a l\'editor d\'Apps Script i torna a implementar. (' + msg + ')' });
+    }
+    return json_({ ok: false, error: msg });
   }
 }
 

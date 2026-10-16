@@ -26,13 +26,16 @@ apps-script/appsscript.json
 7. **Permisos para leer facturas (OCR):** en el editor, elige la función `autoritzar` y pulsa ▶ *Ejecutar*.
    Acepta los permisos (Drive y "conectarse a un servicio externo"). Hazlo **antes** del paso 5 o vuelve
    a publicar una *Nueva versión* después.
+   - Si da *"Se ha producido un error desconocido"*: hazlo desde un **ordenador** (no desde el móvil), en una
+     **ventana de incógnito** donde solo hayas iniciado sesión con la cuenta propietaria del script, y permite
+     las ventanas emergentes de script.google.com.
 
 ## 2. GitHub Pages (frontend)
 
 1. En GitHub: *Settings* → *Pages* → *Source: Deploy from a branch* → rama `main`, carpeta `/ (root)`.
 2. La app quedará en: **https://katwolo.github.io/garatge/**
-3. La primera vez que la abras te pedirá (⚙️) la **URL del Apps Script** y la **clave**. Se guardan en el navegador.
-   - Opcional: pon la URL fija en `GAS_URL_PER_DEFECTE` dentro de `index.html` para no tener que introducirla en cada dispositivo.
+3. La URL del Apps Script ya está integrada (`GAS_URL_PER_DEFECTE` en `index.html`). Si has puesto `CLAU`,
+   la app te pedirá la clave la primera vez (⚙️); se guarda en el navegador.
 
 ## Lectura automática de facturas
 
