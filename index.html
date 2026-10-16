@@ -205,11 +205,12 @@ const thumbCache = new Map();
 const GAS_URL_PER_DEFECTE = 'https://script.google.com/macros/s/AKfycbznt2QDfCrVCKj40kfhuXplaEuX62z44XTVub1C5WeoW4HwgVV4BVw__iA5OdIYI8vL/exec';
 const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* sense emmagatzematge */ } };
-const cfg = () => ({ url: lsGet('garatge.url') || GAS_URL_PER_DEFECTE, clau: lsGet('garatge.clau') });
+// La URL és sempre la del codi; s'esborra qualsevol URL antiga desada al navegador
+try { localStorage.removeItem('garatge.url'); } catch (e) { /* sense emmagatzematge */ }
+const cfg = () => ({ url: GAS_URL_PER_DEFECTE, clau: lsGet('garatge.clau') });
 
 async function gasRun(fn, ...args) {
   const { url, clau } = cfg();
-  if (!url) { obrirConfig(); throw new Error('Configura la URL de l\'Apps Script'); }
   let res;
   try {
     res = await fetch(url, {
@@ -418,7 +419,6 @@ function obrirConfig() {
   const c = cfg();
   obrirModal(capModal('⚙️ Configuració') + `
   <form onsubmit="desarConfig(event)">
-    <label>URL de l'Apps Script<input name="url" type="url" required placeholder="https://script.google.com/macros/s/…/exec" value="${esc(c.url)}"></label>
     <label>Clau d'accés<input name="clau" type="password" autocomplete="current-password" value="${esc(c.clau)}"></label>
     <p style="color:var(--mut);font-size:13px;margin:4px 2px 12px">Es desa només en aquest navegador.</p>
     <button class="btn wide">Desar i connectar</button>
@@ -427,7 +427,6 @@ function obrirConfig() {
 function desarConfig(e) {
   e.preventDefault();
   const d = Object.fromEntries(new FormData(e.target));
-  lsSet('garatge.url', d.url.trim());
   lsSet('garatge.clau', d.clau);
   tancarModal();
   carregar();
@@ -818,7 +817,7 @@ function veureRegistre(id) {
 /* ───── Inici ───── */
 $('#q').addEventListener('input', renderHistorial);
 ['#fVeh', '#fTipus', '#fAny'].forEach(s => $(s).addEventListener('change', renderHistorial));
-if (cfg().url) carregar(); else obrirConfig();
+carregar();
 </script>
 </body>
 </html>

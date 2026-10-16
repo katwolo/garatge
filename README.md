@@ -35,7 +35,8 @@ apps-script/appsscript.json
 1. En GitHub: *Settings* → *Pages* → *Source: Deploy from a branch* → rama `main`, carpeta `/ (root)`.
 2. La app quedará en: **https://katwolo.github.io/garatge/**
 3. La URL del Apps Script ya está integrada (`GAS_URL_PER_DEFECTE` en `index.html`). Si has puesto `CLAU`,
-   la app te pedirá la clave la primera vez (⚙️); se guarda en el navegador.
+   la app te pedirá la clave la primera vez (⚙️); se guarda en el navegador. Si cambias de implementación
+   (URL nueva), actualiza `GAS_URL_PER_DEFECTE`.
 
 ## Lectura automática de facturas
 
