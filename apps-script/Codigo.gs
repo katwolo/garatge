@@ -27,10 +27,12 @@ const COL_REG = ['id', 'vehicle', 'data', 'tipus', 'titol', 'km', 'cost', 'talle
  * Clau d'accés: Configuració del projecte → Propietats de l'script → afegeix CLAU = <la teva clau>.
  * (Si no hi ha CLAU definida, l'API no exigeix clau — no recomanat.)
  */
+const VERSIO = '2026-10-16 · OCR';
 const API = { getData, saveVehicle, deleteVehicle, saveRecord, deleteRecord, getFitxer, llegirFactura };
 
 function doGet() {
-  return json_({ ok: true, app: 'Garatge', missatge: 'API activa. Obre la web de GitHub Pages per fer servir l\'app.' });
+  return json_({ ok: true, app: 'Garatge', versio: VERSIO, funcions: Object.keys(API),
+    missatge: 'API activa. Obre la web de GitHub Pages per fer servir l\'app.' });
 }
 
 function doPost(e) {
