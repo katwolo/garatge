@@ -135,6 +135,7 @@ fieldset.prox legend{font-size:13px;font-weight:700;color:var(--mut);padding:0 6
 .spin{width:42px;height:42px;border-radius:50%;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;animation:sp 0.8s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 [hidden]{display:none!important}
+.ocr{margin-top:8px;font-size:13px;color:var(--mut)}.ocr pre{white-space:pre-wrap;max-height:220px;overflow:auto;background:var(--bg);padding:8px;border-radius:8px}
 input.auto,select.auto,textarea.auto{background:color-mix(in srgb,#facc15 22%,var(--card));border-color:#eab308}
 </style>
 </head>
@@ -523,6 +524,7 @@ function obrirRegistre(id) {
       </div>
       <div id="thumbs" class="thumbs"></div>
       <button type="button" id="btnLlegir" class="btn ghost wide" onclick="llegirFactura()" hidden>✨ Llegir dades de la factura</button>
+      <details id="ocrTxt" class="ocr" hidden><summary>Text llegit de la factura</summary><pre></pre></details>
       <div class="hint">Es desa sola a Drive › Garatge › [vehicle] › [any], amb nom descriptiu.</div>
     </div>
     <button class="btn wide">Desar</button>
@@ -619,6 +621,7 @@ async function eliminarRegistre(id) {
 
 /* ───── Lectura de factures (OCR → camps del formulari) ───── */
 const FEINES = [
+  { re: /recambios|recanvis|repuestos|recambio|recanvi|autopartes|recambistas/, tit: null, tipus: 'Recanvis' },
   { re: /\bi\.?t\.?v\b|inspeccion tecnica|inspeccio tecnica/, tit: 'ITV', tipus: 'ITV' },
   { re: /\bpoliza\b|\bpolissa\b|aseguradora|asseguradora|\bseguro (del |de )?(auto|coche|vehiculo|moto)|recibo de prima/, tit: 'Renovació assegurança', tipus: 'Assegurança' },
   { re: /\bivtm\b|impuesto (sobre |de )?(vehiculos|circulacion)|impost (sobre |de )?(vehicles|circulacio)/, tit: 'Impost de circulació', tipus: 'Impostos' },
@@ -630,7 +633,7 @@ const FEINES = [
   { re: /\brevision\b|\brevisio\b|mantenimiento|manteniment/, tit: 'revisió', tipus: 'Manteniment' },
   { re: /neumaticos?|pneumatics?|\bcubiertas?\b/, tit: 'pneumàtics', tipus: 'Pneumàtics' },
   { re: /alineacion|alineacio|paralelo|equilibrado|equilibrat/, tit: 'alineació', tipus: 'Pneumàtics' },
-  { re: /\bbateria\b/, tit: 'bateria', tipus: 'Reparació' },
+  { re: /\bbaterias?\b|\bbateries\b/, tit: 'bateria', tipus: 'Reparació' },
   { re: /embrague|embragatge/, tit: 'embragatge', tipus: 'Reparació' },
   { re: /distribucion|distribucio/, tit: 'distribució', tipus: 'Reparació' },
   { re: /amortiguador|amortidor/, tit: 'amortidors', tipus: 'Reparació' },
@@ -638,7 +641,7 @@ const FEINES = [
   { re: /aire acondicionado|climatizacion|aire condicionat|carga de gas/, tit: 'aire condicionat', tipus: 'Reparació' },
   { re: /\baveria\b|\bavaria\b|reparacion|reparacio/, tit: 'reparació', tipus: 'Reparació' }
 ];
-const PRIORITAT_TIPUS = ['ITV', 'Assegurança', 'Impostos', 'Reparació', 'Manteniment', 'Pneumàtics'];
+const PRIORITAT_TIPUS = ['ITV', 'Assegurança', 'Impostos', 'Recanvis', 'Reparació', 'Manteniment', 'Pneumàtics'];
 const MESOS_OCR = { ene: 1, gen: 1, feb: 2, mar: 3, abr: 4, may: 5, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, sep: 9, oct: 10, nov: 11, dic: 12, des: 12 };
 const RE_FUTUR = /proxim|propera|siguiente|vencim|venciment|caduc|valid[ao]? hasta|valid fins|fecha limite|data limit|hasta el|fins al/;
 
@@ -697,7 +700,17 @@ function extreuCamps(txt, vehicles) {
     totals.push(...(xs.length ? xs : imports(N[i + 1] || '').concat(imports(N[i + 2] || ''))));
   });
   if (!totals.length) totals = N.filter(s => /€|\beur\b|euros?/.test(s)).flatMap(imports);
-  if (totals.length) out.cost = Math.max(...totals);
+  // Millor pista: base + IVA = total (21 %, 10 % o 4 %), encara que les xifres estiguin en files soltes
+  const totes = [...new Set(N.flatMap(imports))];
+  let ambIva = null;
+  totes.forEach(b => [0.21, 0.10, 0.04].forEach(r => {
+    const iva = totes.find(x => Math.abs(x - b * r) < 0.015);
+    if (iva === undefined) return;
+    const t = totes.find(x => Math.abs(x - (b + iva)) < 0.015);
+    if (t !== undefined && (ambIva === null || t > ambIva)) ambIva = t;
+  }));
+  if (ambIva !== null) out.cost = ambIva;
+  else if (totals.length) out.cost = Math.max(...totals);
 
   // Vehicle: matrícula d'algun vehicle que aparegui al text
   const compacte = String(txt || '').toUpperCase().replace(/[\s\-.]/g, '');
@@ -706,15 +719,20 @@ function extreuCamps(txt, vehicles) {
 
   // Taller: a la capçalera, la línia que sembli el nom d'un negoci
   const cap = linies.slice(0, 10);
-  const RE_NEGOCI = /taller|garaje|garatge|motor|auto|neumatic|pneumatic|mecani|servic|\bs\.?\s?l\.?u?\b|\bs\.?\s?a\.?\b|\bs\.?\s?c\.?p?\b|\bc\.?b\.?\b|itv|seguros|assegurances|mutua/i;
+  const RE_NEGOCI = /taller|recambios|recanvis|repuestos|garaje|garatge|motor|auto|neumatic|pneumatic|mecani|servic|\bs\.?\s?l\.?u?\b|\bs\.?\s?a\.?\b|\bs\.?\s?c\.?p?\b|\bc\.?b\.?\b|itv|seguros|assegurances|mutua/i;
   const RE_NO = /factura|fecha|\bdata\b|cif|nif|n\.?i\.?f|tel[eèf.:]|fax|www|@|https?:|c\/|calle|carrer|avda|avinguda|\bcp\b|^\d|cliente|client|pagina|p[aà]g\./i;
   const bona = l => /[a-zà-ü]{3}/i.test(l) && !RE_NO.test(norm(l)) && l.length <= 60;
-  let taller = cap.find(l => RE_NEGOCI.test(norm(l)) && bona(l)) || cap.find(bona);
+  // També el peu: "RECAMBIOS ARCE, S.L. • REG. MERC…" → fins a la forma societària
+  const RE_SOC = /^(.{3,50}?\b(?:s\.\s?l\.?(?:u\.?)?|s\.\s?a\.?|s\.\s?c\.?p?\.?|s\.\s?coop\.?))(?=\s|,|$)/i;
+  const peu = linies.map(l => (l.match(RE_SOC) || [])[1]).find(l => l && /[a-z]{3}/i.test(l) && !RE_NO.test(norm(l)));
+  let taller = cap.find(l => RE_NEGOCI.test(norm(l)) && bona(l)) || peu || cap.find(bona);
   const taller0 = taller;
   if (taller) {
-    taller = taller.replace(/\s*[-–|·]\s*$/, '').trim();
+    taller = ((taller.match(RE_SOC) || [])[1] || taller).split(/\s[•|·]\s/)[0];
+    if (peu && norm(peu).startsWith(norm(taller).replace(/[,.\s]+$/, ''))) taller = peu; // "RECAMBIOS arce" → "RECAMBIOS ARCE, S.L."
+    taller = taller.replace(/\s*[-–|·,]\s*$/, '').trim();
     if (taller === taller.toUpperCase()) taller = taller.toLowerCase().replace(/(^|[\s(])([a-zà-ü])/g, (m, a, b) => a + b.toUpperCase())
-      .replace(/\bS\.?\s?(l|a)\.?(u)?\.?$/i, (m) => m.toUpperCase());
+      .replace(/\bS\.\s?(l|a|c)\.?(u)?\.?$/i, (m) => m.toUpperCase());
     out.taller = taller;
   }
 
@@ -724,12 +742,12 @@ function extreuCamps(txt, vehicles) {
   if (trobades.length) {
     const tipus = PRIORITAT_TIPUS.find(t => trobades.some(f => f.tipus === t));
     out.tipus = tipus;
-    const tits = [...new Set(trobades.filter(f => ['ITV', 'Assegurança', 'Impostos'].includes(tipus) ? f.tipus === tipus : !['ITV', 'Assegurança', 'Impostos'].includes(f.tipus)).map(f => f.tit))].slice(0, 4);
-    const t = tits.length > 1 ? tits.slice(0, -1).join(', ') + ' i ' + tits[tits.length - 1] : tits[0];
-    out.titol = t.charAt(0).toUpperCase() + t.slice(1);
+    const tits = [...new Set(trobades.filter(f => f.tit).filter(f => ['ITV', 'Assegurança', 'Impostos'].includes(tipus) ? f.tipus === tipus : !['ITV', 'Assegurança', 'Impostos'].includes(f.tipus)).map(f => f.tit))].slice(0, 4);
+    const t = tits.length > 1 ? tits.slice(0, -1).join(', ') + ' i ' + tits[tits.length - 1] : (tits[0] || '');
+    if (t) out.titol = t.charAt(0).toUpperCase() + t.slice(1);
     // Notes: les línies de concepte que han coincidit
     const conc = linies.filter((l, i) => l !== out.taller && linies[i] !== taller0 && !RE_FUTUR.test(N[i]) &&
-      trobades.some(f => f.re.test(N[i])) && l.length <= 90);
+      trobades.some(f => f.tit && f.re.test(N[i])) && l.length <= 90);
     if (conc.length) out.notes = [...new Set(conc)].slice(0, 6).join('\n');
   }
   return out;
@@ -740,8 +758,11 @@ async function llegirFactura(auto) {
   loader(true, 'Llegint la factura…');
   try {
     const txt = await gasRun('llegirFactura', nousFitxers.map(({ base64, mime }) => ({ base64, mime })));
+    const box = $('#ocrTxt');
+    if (box) { box.hidden = false; box.querySelector('pre').textContent = String(txt || '').trim() || '(buit)'; }
+    if (!String(txt || '').trim()) { toast("L'OCR no ha trobat text a la imatge. Prova una foto més recta i amb més llum.", true); return; }
     const n = omplirAmb(extreuCamps(txt, S.vehicles));
-    toast(n ? `${n} camps omplerts amb la factura. Revisa'ls abans de desar.` : "No s'han trobat dades a la factura", !n && !auto);
+    toast(n ? `${n} camps omplerts amb la factura. Revisa'ls abans de desar.` : "S'ha llegit text però no s'hi han trobat dades (mira «Text llegit»)", !n);
   }
   catch (err) { toast(errMsg(err), true); }
   finally { loader(false); }
