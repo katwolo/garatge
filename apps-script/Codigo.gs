@@ -27,7 +27,7 @@ const COL_REG = ['id', 'vehicle', 'data', 'tipus', 'titol', 'km', 'cost', 'talle
  * Clau d'accés: Configuració del projecte → Propietats de l'script → afegeix CLAU = <la teva clau>.
  * (Si no hi ha CLAU definida, l'API no exigeix clau — no recomanat.)
  */
-const API = { getData, saveVehicle, deleteVehicle, saveRecord, deleteRecord, getFitxer };
+const API = { getData, saveVehicle, deleteVehicle, saveRecord, deleteRecord, getFitxer, llegirFactura };
 
 function doGet() {
   return json_({ ok: true, app: 'Garatge', missatge: 'API activa. Obre la web de GitHub Pages per fer servir l\'app.' });
@@ -208,6 +208,49 @@ function getFitxer(id) {
   const b = f.getMimeType().indexOf('image/') === 0 ? f.getBlob() : f.getThumbnail();
   if (!b) return null;
   return 'data:' + (b.getContentType() || 'image/png') + ';base64,' + Utilities.base64Encode(b.getBytes());
+}
+
+/* ───────────── OCR de factures (Drive) ───────────── */
+
+/**
+ * Passa fotos/PDF per l'OCR de Google Drive i en retorna el text.
+ * Es crea un Document de Google temporal (conversió amb OCR), se n'exporta el text i s'esborra.
+ * @param {Array} fitxers [{base64, mime}]
+ * @return {string} text de tots els fitxers, un darrere l'altre
+ */
+function llegirFactura(fitxers) {
+  const token = ScriptApp.getOAuthToken();
+  const auth = { Authorization: 'Bearer ' + token };
+  return (fitxers || []).slice(0, 4).map(f => {
+    const bnd = 'garatge' + Utilities.getUuid();
+    const meta = { name: 'garatge-ocr-temporal', mimeType: 'application/vnd.google-apps.document' };
+    const cap = Utilities.newBlob('--' + bnd + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' +
+      JSON.stringify(meta) + '\r\n--' + bnd + '\r\nContent-Type: ' + f.mime + '\r\n\r\n').getBytes();
+    const peu = Utilities.newBlob('\r\n--' + bnd + '--').getBytes();
+    const up = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&ocrLanguage=es&fields=id', {
+      method: 'post', contentType: 'multipart/related; boundary=' + bnd, headers: auth,
+      payload: cap.concat(Utilities.base64Decode(f.base64), peu), muteHttpExceptions: true
+    });
+    if (up.getResponseCode() >= 300) throw new Error('OCR: ' + up.getContentText().slice(0, 200));
+    const id = JSON.parse(up.getContentText()).id;
+    try {
+      const ex = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + id + '/export?mimeType=text/plain',
+        { headers: auth, muteHttpExceptions: true });
+      if (ex.getResponseCode() >= 300) throw new Error('OCR: ' + ex.getContentText().slice(0, 200));
+      return ex.getContentText('UTF-8');
+    } finally {
+      UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + id, { method: 'delete', headers: auth, muteHttpExceptions: true });
+    }
+  }).join('\n\n');
+}
+
+/** Executa-la una vegada des de l'editor per concedir els permisos nous (Drive + connexions externes). */
+function autoritzar() {
+  DriveApp.getRootFolder();
+  UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }
+  });
+  return 'Permisos concedits';
 }
 
 /* ───────────── API ───────────── */

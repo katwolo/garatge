@@ -134,6 +134,8 @@ fieldset.prox legend{font-size:13px;font-weight:700;color:var(--mut);padding:0 6
 .loader.on{display:flex}
 .spin{width:42px;height:42px;border-radius:50%;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;animation:sp 0.8s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
+[hidden]{display:none!important}
+input.auto,select.auto,textarea.auto{background:color-mix(in srgb,#facc15 22%,var(--card));border-color:#eab308}
 </style>
 </head>
 <body>
@@ -520,6 +522,7 @@ function obrirRegistre(id) {
         <label class="btn ghost">📎 Adjuntar<input type="file" accept="image/*,application/pdf" multiple hidden onchange="afegirFitxers(this)"></label>
       </div>
       <div id="thumbs" class="thumbs"></div>
+      <button type="button" id="btnLlegir" class="btn ghost wide" onclick="llegirFactura()" hidden>✨ Llegir dades de la factura</button>
       <div class="hint">Es desa sola a Drive › Garatge › [vehicle] › [any], amb nom descriptiu.</div>
     </div>
     <button class="btn wide">Desar</button>
@@ -575,6 +578,9 @@ async function afegirFitxers(inp) {
     catch (e) { toast("No s'ha pogut llegir " + f.name, true); }
   }
   pintarThumbs();
+  // Registre nou sense dades: llegeix la factura automàticament
+  const fr = $('#fr');
+  if (files.length && nousFitxers.length && fr && !fr.elements.id.value && !fr.elements.titol.value && !fr.elements.cost.value) llegirFactura(true);
 }
 function pintarThumbs() {
   $('#thumbs').innerHTML =
@@ -582,6 +588,7 @@ function pintarThumbs() {
       <button type="button" onclick="treureActual(${i})">✕</button></div>`).join('') +
     nousFitxers.map((f, i) => `<div class="th nou">${f.preview ? `<img src="${f.preview}">` : `<a>📄<small>${esc(f.nom)}</small></a>`}
       <button type="button" onclick="treureNou(${i})">✕</button></div>`).join('');
+  $('#btnLlegir').hidden = !nousFitxers.length;
 }
 function treureNou(i) { nousFitxers.splice(i, 1); pintarThumbs(); }
 function treureActual(i) {
@@ -608,6 +615,150 @@ async function eliminarRegistre(id) {
   try { aplicar(await gasRun('deleteRecord', id)); tancarModal(); toast('Registre eliminat'); }
   catch (err) { toast(errMsg(err), true); }
   finally { loader(false); }
+}
+
+/* ───── Lectura de factures (OCR → camps del formulari) ───── */
+const FEINES = [
+  { re: /\bi\.?t\.?v\b|inspeccion tecnica|inspeccio tecnica/, tit: 'ITV', tipus: 'ITV' },
+  { re: /\bpoliza\b|\bpolissa\b|aseguradora|asseguradora|\bseguro (del |de )?(auto|coche|vehiculo|moto)|recibo de prima/, tit: 'Renovació assegurança', tipus: 'Assegurança' },
+  { re: /\bivtm\b|impuesto (sobre |de )?(vehiculos|circulacion)|impost (sobre |de )?(vehicles|circulacio)/, tit: 'Impost de circulació', tipus: 'Impostos' },
+  { re: /\baceite\b|\boli\b|\blubricante|\b[05]w-?\d0\b|\b10w-?\d0\b/, tit: "canvi d'oli", tipus: 'Manteniment' },
+  { re: /\bfiltros?\b|\bfiltres?\b/, tit: 'filtres', tipus: 'Manteniment' },
+  { re: /\bfrenos?\b|\bfrens?\b|pastillas?|pastilles?|discos? de fren/, tit: 'frens', tipus: 'Manteniment' },
+  { re: /\bbujias?\b|\bbugies?\b/, tit: 'bugies', tipus: 'Manteniment' },
+  { re: /escobillas?|limpiaparabrisas|eixugaparabrises/, tit: 'eixugaparabrises', tipus: 'Manteniment' },
+  { re: /\brevision\b|\brevisio\b|mantenimiento|manteniment/, tit: 'revisió', tipus: 'Manteniment' },
+  { re: /neumaticos?|pneumatics?|\bcubiertas?\b/, tit: 'pneumàtics', tipus: 'Pneumàtics' },
+  { re: /alineacion|alineacio|paralelo|equilibrado|equilibrat/, tit: 'alineació', tipus: 'Pneumàtics' },
+  { re: /\bbateria\b/, tit: 'bateria', tipus: 'Reparació' },
+  { re: /embrague|embragatge/, tit: 'embragatge', tipus: 'Reparació' },
+  { re: /distribucion|distribucio/, tit: 'distribució', tipus: 'Reparació' },
+  { re: /amortiguador|amortidor/, tit: 'amortidors', tipus: 'Reparació' },
+  { re: /\bescape\b|escapament/, tit: "tub d'escapament", tipus: 'Reparació' },
+  { re: /aire acondicionado|climatizacion|aire condicionat|carga de gas/, tit: 'aire condicionat', tipus: 'Reparació' },
+  { re: /\baveria\b|\bavaria\b|reparacion|reparacio/, tit: 'reparació', tipus: 'Reparació' }
+];
+const PRIORITAT_TIPUS = ['ITV', 'Assegurança', 'Impostos', 'Reparació', 'Manteniment', 'Pneumàtics'];
+const MESOS_OCR = { ene: 1, gen: 1, feb: 2, mar: 3, abr: 4, may: 5, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, sep: 9, oct: 10, nov: 11, dic: 12, des: 12 };
+const RE_FUTUR = /proxim|propera|siguiente|vencim|venciment|caduc|valid[ao]? hasta|valid fins|fecha limite|data limit|hasta el|fins al/;
+
+function extreuCamps(txt, vehicles) {
+  const linies = String(txt || '').split(/\r?\n/).map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const N = linies.map(norm);
+  const out = {};
+  const anyMax = new Date().getFullYear() + 1;
+
+  // Dates: "16/10/2026", "16-10-26", "16.10.2026", "16 de octubre de 2026"
+  const iso = (d, m, y) => {
+    d = +d; m = +m; y = +y; if (y < 100) y += 2000;
+    if (m < 1 || m > 12 || d < 1 || d > 31 || y < 2000 || y > anyMax + 10) return null;
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  };
+  const datesDe = s => {
+    const r = [];
+    for (const m of s.matchAll(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4}|\d{2})\b/g)) { const d = iso(m[1], m[2], m[3]); if (d) r.push(d); }
+    for (const m of s.matchAll(/\b(\d{1,2}) (?:de |d')?([a-z]{3})[a-z]* (?:de |del )?(\d{4})\b/g)) {
+      const mes = MESOS_OCR[m[2]]; if (mes) { const d = iso(m[1], mes, m[3]); if (d) r.push(d); }
+    }
+    return r;
+  };
+  const DATA_CLAU = /\bfecha\b|\bdata\b|\bfra\b|fecha factura|data factura|emision|emissio/;
+  const avuiIso = avui();
+  N.forEach((s, i) => {
+    const ds = datesDe(s).length ? datesDe(s) : (DATA_CLAU.test(s) && N[i + 1] ? datesDe(N[i + 1]) : []);
+    if (!ds.length) return;
+    if (RE_FUTUR.test(s)) { if (!out.properaData) out.properaData = ds[0]; return; }
+    if (/nacimiento|naixement|matriculacion|matriculacio|expedicion/.test(s)) return;
+    if (DATA_CLAU.test(s) && !out._dataClau) { out.data = ds[0]; out._dataClau = true; return; }
+    if (!out.data && ds[0] <= avuiIso) out.data = ds[0];
+  });
+  delete out._dataClau;
+
+  // Quilòmetres: "Km: 123.456", "123456 km", "Kilometraje 98.000"
+  const RE_KM1 = /\b(?:kms?|kilometr[a-z]*|quilometr[a-z]*)\b\.?\s*[:.]?\s*(\d{1,3}(?:[.\s]\d{3})+|\d{3,7})\b/;
+  const RE_KM2 = /\b(\d{1,3}(?:[.\s]\d{3})+|\d{3,7})\s*kms?\b(?!\/)/;
+  N.forEach(s => {
+    const m = s.match(RE_KM1) || s.match(RE_KM2); if (!m) return;
+    const km = Number(m[1].replace(/[.\s]/g, ''));
+    if (km < 50 || km > 2e6) return;
+    if (RE_FUTUR.test(s)) { if (!out.propersKm) out.propersKm = km; }
+    else if (!out.km) out.km = km;
+  });
+
+  // Import total: la xifra més alta de les línies "total" (no subtotal/base/IVA)
+  const imports = s => [...s.replace(/\b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}\b/g, ' ')
+    .matchAll(/(?<![\d.,])(\d{1,3}(?:[.\s]\d{3})+|\d+)[,.](\d{2})(?![\d%]|\s?%)/g)]
+    .map(m => Number(m[1].replace(/[.\s]/g, '') + '.' + m[2])).filter(n => n > 0 && n < 1e6);
+  let totals = [];
+  N.forEach((s, i) => {
+    if (!/\btotal\b|a pagar|importe|import\b/.test(s)) return;
+    if (/sub ?total|base imp|total (de )?iva|total dto|descuento|descompte|\bneto\b/.test(s) && !/total factura|a pagar|iva incl/.test(s)) return;
+    const xs = imports(s);
+    totals.push(...(xs.length ? xs : imports(N[i + 1] || '').concat(imports(N[i + 2] || ''))));
+  });
+  if (!totals.length) totals = N.filter(s => /€|\beur\b|euros?/.test(s)).flatMap(imports);
+  if (totals.length) out.cost = Math.max(...totals);
+
+  // Vehicle: matrícula d'algun vehicle que aparegui al text
+  const compacte = String(txt || '').toUpperCase().replace(/[\s\-.]/g, '');
+  const veh = (vehicles || []).find(v => v.matricula && compacte.includes(String(v.matricula).toUpperCase().replace(/[\s\-.]/g, '')));
+  if (veh) out.vehicle = veh.id;
+
+  // Taller: a la capçalera, la línia que sembli el nom d'un negoci
+  const cap = linies.slice(0, 10);
+  const RE_NEGOCI = /taller|garaje|garatge|motor|auto|neumatic|pneumatic|mecani|servic|\bs\.?\s?l\.?u?\b|\bs\.?\s?a\.?\b|\bs\.?\s?c\.?p?\b|\bc\.?b\.?\b|itv|seguros|assegurances|mutua/i;
+  const RE_NO = /factura|fecha|\bdata\b|cif|nif|n\.?i\.?f|tel[eèf.:]|fax|www|@|https?:|c\/|calle|carrer|avda|avinguda|\bcp\b|^\d|cliente|client|pagina|p[aà]g\./i;
+  const bona = l => /[a-zà-ü]{3}/i.test(l) && !RE_NO.test(norm(l)) && l.length <= 60;
+  let taller = cap.find(l => RE_NEGOCI.test(norm(l)) && bona(l)) || cap.find(bona);
+  const taller0 = taller;
+  if (taller) {
+    taller = taller.replace(/\s*[-–|·]\s*$/, '').trim();
+    if (taller === taller.toUpperCase()) taller = taller.toLowerCase().replace(/(^|[\s(])([a-zà-ü])/g, (m, a, b) => a + b.toUpperCase())
+      .replace(/\bS\.?\s?(l|a)\.?(u)?\.?$/i, (m) => m.toUpperCase());
+    out.taller = taller;
+  }
+
+  // Què s'ha fet + tipus, segons paraules clau
+  const tot = N.filter(s => !RE_FUTUR.test(s)).join('\n');
+  const trobades = FEINES.filter(f => f.re.test(tot));
+  if (trobades.length) {
+    const tipus = PRIORITAT_TIPUS.find(t => trobades.some(f => f.tipus === t));
+    out.tipus = tipus;
+    const tits = [...new Set(trobades.filter(f => ['ITV', 'Assegurança', 'Impostos'].includes(tipus) ? f.tipus === tipus : !['ITV', 'Assegurança', 'Impostos'].includes(f.tipus)).map(f => f.tit))].slice(0, 4);
+    const t = tits.length > 1 ? tits.slice(0, -1).join(', ') + ' i ' + tits[tits.length - 1] : tits[0];
+    out.titol = t.charAt(0).toUpperCase() + t.slice(1);
+    // Notes: les línies de concepte que han coincidit
+    const conc = linies.filter((l, i) => l !== out.taller && linies[i] !== taller0 && !RE_FUTUR.test(N[i]) &&
+      trobades.some(f => f.re.test(N[i])) && l.length <= 90);
+    if (conc.length) out.notes = [...new Set(conc)].slice(0, 6).join('\n');
+  }
+  return out;
+}
+
+async function llegirFactura(auto) {
+  if (!nousFitxers.length) { toast('Primer fes una foto o adjunta la factura'); return; }
+  loader(true, 'Llegint la factura…');
+  try {
+    const txt = await gasRun('llegirFactura', nousFitxers.map(({ base64, mime }) => ({ base64, mime })));
+    const n = omplirAmb(extreuCamps(txt, S.vehicles));
+    toast(n ? `${n} camps omplerts amb la factura. Revisa'ls abans de desar.` : "No s'han trobat dades a la factura", !n && !auto);
+  }
+  catch (err) { toast(errMsg(err), true); }
+  finally { loader(false); }
+}
+function omplirAmb(c) {
+  const f = $('#fr'); if (!f) return 0;
+  let n = 0;
+  const posa = (k, v) => {
+    if (buit(v) || !f.elements[k]) return;
+    if (k === 'notes' && f.elements.notes.value.trim()) return; // no trepitja notes escrites
+    f.elements[k].value = v; f.elements[k].classList.add('auto'); n++;
+  };
+  if (c.vehicle) { posa('vehicle', c.vehicle); placeholderKm(); }
+  if (c.tipus) { const b = document.querySelector(`#chipsTipus .chip[data-t="${c.tipus}"]`); if (b) triaTipus(b); }
+  ['titol', 'data', 'km', 'cost', 'taller', 'notes', 'properaData', 'propersKm'].forEach(k => posa(k, c[k]));
+  if (c.tipus === 'ITV' || c.tipus === 'Assegurança') f.elements.propersKm.value = '';
+  return n;
 }
 
 /* ───── Detall ───── */

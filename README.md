@@ -23,6 +23,9 @@ apps-script/appsscript.json
    - Ejecutar como: **Yo** · Quién tiene acceso: **Cualquier persona**.
    - Si no tenías implementación: *Nueva implementación* → tipo *Aplicación web*.
 6. Copia la URL que acaba en `/exec`.
+7. **Permisos para leer facturas (OCR):** en el editor, elige la función `autoritzar` y pulsa ▶ *Ejecutar*.
+   Acepta los permisos (Drive y "conectarse a un servicio externo"). Hazlo **antes** del paso 5 o vuelve
+   a publicar una *Nueva versión* después.
 
 ## 2. GitHub Pages (frontend)
 
@@ -31,8 +34,21 @@ apps-script/appsscript.json
 3. La primera vez que la abras te pedirá (⚙️) la **URL del Apps Script** y la **clave**. Se guardan en el navegador.
    - Opcional: pon la URL fija en `GAS_URL_PER_DEFECTE` dentro de `index.html` para no tener que introducirla en cada dispositivo.
 
+## Lectura automática de facturas
+
+Al hacer una foto o adjuntar un PDF en un **registro nuevo**, la app lee la factura sola y rellena los campos
+(se marcan en amarillo para que los revises). En registros ya existentes, pulsa **✨ Llegir dades de la factura**.
+
+- El Apps Script usa el **OCR de Google Drive** (gratis, sin claves): convierte la imagen en un Documento temporal,
+  saca el texto y lo borra.
+- La app busca en ese texto: **fecha**, **km**, **total** (la cifra mayor de las líneas "Total", sin base ni IVA),
+  **matrícula** (para elegir el vehículo), **taller** (cabecera), **tipo** y **qué se ha hecho** (palabras clave:
+  aceite, filtros, frenos, neumáticos, ITV, póliza…), y "próxima revisión/vencimiento" → *Propera revisió*.
+- Es por patrones, así que no es infalible: revisa siempre antes de guardar. Funciona mejor con fotos rectas,
+  bien iluminadas y con PDFs originales.
+
 ## Cómo funciona la conexión
 
 `index.html` hace `fetch(POST)` a la URL `/exec` con `{ clau, fn, args }` y el Apps Script responde
 `{ ok, data | error }`. Funciones disponibles: `getData`, `saveVehicle`, `deleteVehicle`,
-`saveRecord`, `deleteRecord`, `getFitxer`.
+`saveRecord`, `deleteRecord`, `getFitxer`, `llegirFactura`.
